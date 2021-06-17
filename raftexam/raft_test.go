@@ -87,8 +87,8 @@ func (clus *cluster) Close() (err error) {
 			err = erri
 		}
 		// clean intermediates
-		os.RemoveAll(fmt.Sprintf("raftexample-%d", i+1))
-		os.RemoveAll(fmt.Sprintf("raftexample-%d-snap", i+1))
+		os.RemoveAll(fmt.Sprintf("raft-%d", i+1))
+		os.RemoveAll(fmt.Sprintf("raft-%d-snap", i+1))
 	}
 	return err
 }
@@ -227,11 +227,11 @@ func TestAddNewNode(t *testing.T) {
 	clus := newCluster(3)
 	defer clus.closeNoErrors(t)
 
-	os.RemoveAll("raftexample-4")
-	os.RemoveAll("raftexample-4-snap")
+	os.RemoveAll("raft-4")
+	os.RemoveAll("raft-4-snap")
 	defer func() {
-		os.RemoveAll("raftexample-4")
-		os.RemoveAll("raftexample-4-snap")
+		os.RemoveAll("raft-4")
+		os.RemoveAll("raft-4-snap")
 	}()
 
 	newNodeURL := "http://127.0.0.1:10004"
