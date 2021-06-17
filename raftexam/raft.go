@@ -101,9 +101,9 @@ func newRaftNode(
 
 func (rc *raftNode) saveSnap(snapshot raftpb.Snapshot) error {
 	walSnap := walpb.Snapshot{
-		Index: snapshot.Metadata.Index,
-		Term:  snapshot.Metadata.Term,
-		// ConfState: &snapshot.Metadata.ConfState,
+		Index:     snapshot.Metadata.Index,
+		Term:      snapshot.Metadata.Term,
+		ConfState: &snapshot.Metadata.ConfState,
 	}
 	if err := rc.snapshotter.SaveSnap(snapshot); err != nil {
 		return err

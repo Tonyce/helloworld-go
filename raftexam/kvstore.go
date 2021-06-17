@@ -89,9 +89,9 @@ func (s *kvstore) readCommits(commitC <-chan *commit, errorC <-chan error) {
 			if err := dec.Decode(&dataKv); err != nil {
 				log.Fatalf("could not decode message (%v)", err)
 			}
-			s.mu.Lock()
+			s.mu.RLock()
 			s.kvStore[dataKv.Key] = dataKv.Value
-			s.mu.Unlock()
+			s.mu.RUnlock()
 		}
 		close(commit.applyDoneC)
 	}
@@ -101,8 +101,8 @@ func (s *kvstore) readCommits(commitC <-chan *commit, errorC <-chan error) {
 }
 
 func (s *kvstore) getSnapshot() ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return json.Marshal(s.kvStore)
 }
 
