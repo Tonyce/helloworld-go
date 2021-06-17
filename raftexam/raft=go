@@ -28,7 +28,6 @@ type commit struct {
 	applyDoneC chan<- struct{}
 }
 
-// A key-value stream backed by raft
 type raftNode struct {
 	proposeC    <-chan string            // proposed messages (k,v)
 	confChangeC <-chan raftpb.ConfChange // proposed cluster config changes
@@ -65,11 +64,6 @@ type raftNode struct {
 
 var defaultSnapshotCount uint64 = 10000
 
-// newRaftNode initiates a raft instance and returns a committed log entry
-// channel and error channel. Proposals for log updates are sent over the
-// provided the proposal channel. All log entries are replayed over the
-// commit channel, followed by a nil message (to indicate the channel is
-// current), then new log entries. To shutdown, close proposeC and read errorC.
 func newRaftNode(
 	id int,
 	peers []string,
@@ -139,8 +133,6 @@ func (rc *raftNode) entriesToApply(ents []raftpb.Entry) (nents []raftpb.Entry) {
 	return nents
 }
 
-// publishEntries writes committed log entries to commit channel and returns
-// whether all entries could be published.
 func (rc *raftNode) publishEntries(ents []raftpb.Entry) (<-chan struct{}, bool) {
 	if len(ents) == 0 {
 		return nil, true
@@ -207,7 +199,6 @@ func (rc *raftNode) loadSnapshot() *raftpb.Snapshot {
 	return &raftpb.Snapshot{}
 }
 
-// openWAL returns a WAL ready for reading.
 func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	if !wal.Exist(rc.waldir) {
 		if err := os.Mkdir(rc.waldir, 0750); err != nil {
@@ -234,7 +225,6 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	return w
 }
 
-// replayWAL replays WAL entries into the raft instance.
 func (rc *raftNode) replayWAL() *wal.WAL {
 	log.Printf("replaying WAL of member %d", rc.id)
 	snapshot := rc.loadSnapshot()
@@ -318,7 +308,6 @@ func (rc *raftNode) startRaft() {
 	go rc.serveChannels()
 }
 
-// stop closes http, closes all channels, and stops raft.
 func (rc *raftNode) stop() {
 	rc.stopHTTP()
 	close(rc.commitC)
