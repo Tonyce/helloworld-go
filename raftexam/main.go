@@ -25,9 +25,19 @@ func main() {
 		return kvs.getSnapshot()
 	}
 
-	commitC, errorC, snapshotterReady := newRaftNode(*id, strings.Split(*cluster, ","), *join, getSnapshot, proposeC, confChangeC)
+	commitC, errorC, snapshotterReady := newRaftNode(
+		*id,
+		strings.Split(*cluster, ","),
+		*join,
+		getSnapshot,
+		proposeC,
+		confChangeC,
+	)
 
+	_, _, _ = commitC, errorC, snapshotterReady
+	_ = kvport
 	kvs = newKVStore(<-snapshotterReady, proposeC, commitC, errorC)
 
 	serveHttpKVAPI(kvs, *kvport, confChangeC, errorC)
+	// select {}
 }

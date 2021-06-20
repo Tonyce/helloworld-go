@@ -99,6 +99,81 @@ func newRaftNode(
 	return commitC, errorC, rc.snapshotterReady
 }
 
+func (rc *raftNode) startRaft() {
+	if !fileutil.Exist(rc.snapdir) {
+		if err := os.Mkdir(rc.snapdir, 0750); err != nil {
+			log.Fatalf("raft: connot create dir for snapshot (%v)", err)
+		}
+	}
+	rc.snapshotter = snap.New(zap.NewExample(), rc.snapdir)
+
+	oldwal := wal.Exist(rc.waldir)
+	rc.wal = rc.replayWAL()
+
+	rc.snapshotterReady <- rc.snapshotter
+
+	rpeers := make([]raft.Peer, len(rc.peers))
+	for i := range rpeers {
+		rpeers[i] = raft.Peer{
+			ID: uint64(i + 1),
+		}
+	}
+
+	c := &raft.Config{
+		ID:                        uint64(rc.id),
+		ElectionTick:              10, // TODO
+		HeartbeatTick:             1,  // TODO
+		Storage:                   rc.raftStorage,
+		MaxSizePerMsg:             1024 * 1024,
+		MaxInflightMsgs:           256,
+		MaxUncommittedEntriesSize: 1 << 30,
+	}
+
+	if oldwal || rc.join {
+		rc.node = raft.RestartNode(c)
+	} else {
+		rc.node = raft.StartNode(c, rpeers)
+	}
+
+	rc.transport = &rafthttp.Transport{
+		Logger:      rc.logger,
+		ID:          types.ID(rc.id),
+		ClusterID:   0x1000,
+		Raft:        rc,
+		ServerStats: stats.NewServerStats("", ""),
+		LeaderStats: stats.NewLeaderStats(zap.NewExample(), strconv.Itoa(rc.id)),
+		ErrorC:      make(chan error),
+	}
+	rc.transport.Start()
+	for i := range rc.peers {
+		if i+1 != rc.id {
+			rc.transport.AddPeer(types.ID(i+1), []string{rc.peers[i]})
+		}
+	}
+
+	go rc.serveRaft()
+	go rc.serveChannels()
+}
+
+func (rc *raftNode) replayWAL() *wal.WAL {
+	log.Printf("replaying WAL of member %d", rc.id)
+	snapshot := rc.loadSnapshot()
+	wal := rc.openWAL(snapshot)
+
+	metaData, hardState, entrys, err := wal.ReadAll()
+	_ = metaData
+	if err != nil {
+		log.Fatalf("raftnode: failed to read WAL (%v)", err)
+	}
+	rc.raftStorage = raft.NewMemoryStorage()
+	if snapshot != nil {
+		rc.raftStorage.ApplySnapshot(*snapshot)
+	}
+	rc.raftStorage.SetHardState(hardState)
+	rc.raftStorage.Append(entrys)
+	return wal
+}
+
 func (rc *raftNode) saveSnap(snapshot raftpb.Snapshot) error {
 	walSnap := walpb.Snapshot{
 		Index:     snapshot.Metadata.Index,
@@ -214,87 +289,12 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	return w
 }
 
-func (rc *raftNode) replayWAL() *wal.WAL {
-	log.Printf("replaying WAL of member %d", rc.id)
-	snapshot := rc.loadSnapshot()
-	w := rc.openWAL(snapshot)
-
-	metaData, hardState, entrys, err := w.ReadAll()
-	_ = metaData
-	if err != nil {
-		log.Fatalf("raftnode: failed to read WAL (%v)", err)
-	}
-	rc.raftStorage = raft.NewMemoryStorage()
-	if snapshot != nil {
-		rc.raftStorage.ApplySnapshot(*snapshot)
-	}
-	rc.raftStorage.SetHardState(hardState)
-	rc.raftStorage.Append(entrys)
-	return w
-}
-
 func (rc *raftNode) writeError(err error) {
 	rc.stopHTTP()
 	close(rc.commitC)
 	rc.errorC <- err
 	close(rc.errorC)
 	rc.node.Stop()
-}
-
-func (rc *raftNode) startRaft() {
-	if !fileutil.Exist(rc.snapdir) {
-		if err := os.Mkdir(rc.snapdir, 0750); err != nil {
-			log.Fatalf("raft: connot create dir for snapshot (%v)", err)
-		}
-	}
-	rc.snapshotter = snap.New(zap.NewExample(), rc.snapdir)
-
-	oldwal := wal.Exist(rc.waldir)
-	rc.wal = rc.replayWAL()
-
-	rc.snapshotterReady <- rc.snapshotter
-
-	rpeers := make([]raft.Peer, len(rc.peers))
-	for i := range rpeers {
-		rpeers[i] = raft.Peer{
-			ID: uint64(i + 1),
-		}
-	}
-
-	c := &raft.Config{
-		ID:                        uint64(rc.id),
-		ElectionTick:              10, // TODO
-		HeartbeatTick:             1,  // TODO
-		Storage:                   rc.raftStorage,
-		MaxSizePerMsg:             1024 * 1024,
-		MaxInflightMsgs:           256,
-		MaxUncommittedEntriesSize: 1 << 30,
-	}
-
-	if oldwal || rc.join {
-		rc.node = raft.RestartNode(c)
-	} else {
-		rc.node = raft.StartNode(c, rpeers)
-	}
-
-	rc.transport = &rafthttp.Transport{
-		Logger:      rc.logger,
-		ID:          types.ID(rc.id),
-		ClusterID:   0x1000,
-		Raft:        rc,
-		ServerStats: stats.NewServerStats("", ""),
-		LeaderStats: stats.NewLeaderStats(zap.NewExample(), strconv.Itoa(rc.id)),
-		ErrorC:      make(chan error),
-	}
-	rc.transport.Start()
-	for i := range rc.peers {
-		if i+1 != rc.id {
-			rc.transport.AddPeer(types.ID(i+1), []string{rc.peers[i]})
-		}
-	}
-
-	go rc.serveRaft()
-	go rc.serveChannels()
 }
 
 func (rc *raftNode) stop() {
@@ -383,12 +383,14 @@ func (rc *raftNode) serveChannels() {
 		for rc.proposeC != nil && rc.confChangeC != nil {
 			select {
 			case prop, ok := <-rc.proposeC:
+				fmt.Printf("rc.proposeC .%v.\n", ok)
 				if !ok {
 					rc.proposeC = nil
 				} else {
 					rc.node.Propose(context.TODO(), []byte(prop))
 				}
 			case cc, ok := <-rc.confChangeC:
+				fmt.Printf("rc.confChangeC .%v.\n", ok)
 				if !ok {
 					rc.confChangeC = nil
 				} else {
@@ -404,8 +406,10 @@ func (rc *raftNode) serveChannels() {
 	for {
 		select {
 		case <-ticker.C:
+			fmt.Println("ticker.C")
 			rc.node.Tick()
 		case rd := <-rc.node.Ready():
+			fmt.Printf("node ready ...\n")
 			rc.wal.Save(rd.HardState, rd.Entries)
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				rc.saveSnap(rd.Snapshot)
