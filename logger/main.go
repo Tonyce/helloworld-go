@@ -11,25 +11,28 @@ import (
 func main() {
 	// logger := zap.NewExample()
 	w := zapcore.AddSync(&lumberjack.Logger{
-		Filename:   "./logs/foo.log",
-		MaxSize:    500, // megabytes
-		MaxBackups: 3,
-		MaxAge:     28, // days
+		Filename: "./logs/foo.log",
+		// MaxSize:    500, // megabytes
+		// MaxBackups: 3,
+		MaxAge: 28, // days
 	})
-	// atom := zap.NewAtomicLevel()
+	atom := zap.NewAtomicLevel()
 
 	encoderCfg := zap.NewProductionEncoderConfig()
 	encoderCfg.TimeKey = "timestamp"
-	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderCfg.EncodeTime = zapcore.RFC3339NanoTimeEncoder
 
-	// atom.SetLevel(zap.ErrorLevel)
+	atom.SetLevel(zap.ErrorLevel)
 
 	core := zapcore.NewCore(
 		// zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
 		zapcore.NewJSONEncoder(encoderCfg),
 		w,
-		zap.InfoLevel,
+		// zap.DebugLevel,
+		atom,
 	)
+
+	// atom.Level()
 
 	logger := zap.New(core)
 	defer logger.Sync()
@@ -57,5 +60,11 @@ func main() {
 		"attempt", 3,
 		"backoff", time.Second,
 	)
-	sugar.Infof("Failed to fetch URL: %s", url)
+	sugar.Debugf("Failed to fetch URL: %s", url)
+
+	// http.HandleFunc("/handle/level", zap.zapLevelHandler)
+	// if err := http.ListenAndServe(":9098", nil); err != nil {
+	// 	panic(err)
+	// }
+
 }

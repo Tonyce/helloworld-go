@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -34,7 +35,7 @@ import (
 func TestEndpoint(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	time.Sleep(time.Second * 5)
-	w.Write([]byte("Test is what we usually do"))
+	w.Write([]byte("Test is what we usually do:" + strconv.Itoa(os.Getpid())))
 }
 
 func main() {
@@ -59,7 +60,7 @@ func main() {
 	s := <-done
 	log.Printf("Server Stopped %+v", s)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer func() {
 		// extra handling here
 		cancel()
